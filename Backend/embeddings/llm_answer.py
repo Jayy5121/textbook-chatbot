@@ -10,12 +10,14 @@ import requests
 from typing import List
 
 import os
-
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env
 # API KEYS - Get from environment variables or use defaults
-TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY', '05348ac45f18c54de2a0739471a07263ba527c750ccedd023b118cb8b6f90f68')
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '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')
+TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 
-
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env
 def call_together_ai(chunks: List[str], user_query: str) -> str:
     """Call Together.ai API for answer generation"""
     try:
