@@ -13,16 +13,42 @@ const SearchComponent = () => {
   const [searchAttempted, setSearchAttempted] = useState(false);
   const [isDark, setIsDark] = useState(false);
 
-  const searchSuggestions = [
-    "What is machine learning?",
-    "Define neural networks",
-    "Explain supervised learning",
-    "What are algorithms?",
-    "Introduction to data science",
-    "How does classification work?",
-    "What is regression?",
-    "Explain feature selection"
-  ];
+
+  // Replace the hardcoded searchSuggestions array with a dynamic object
+  const searchSuggestionsByTextbook = {
+    'computer_networks': [
+      "What is a computer network?",
+      "Explain the OSI model",
+      "What is IP addressing?",
+      "Define packet switching",
+      "What is TCP/IP?",
+      "How does DNS work?",
+      "What are network protocols?",
+      "Explain network topologies"
+    ],
+    'economics': [
+      "What is demand?",
+      "Explain the law of supply and demand",
+      "What is GDP?",
+      "Define inflation",
+      "What are market structures?",
+      "What is opportunity cost?",
+      "Explain economic equilibrium",
+      "What is monetary policy?"
+    ],
+
+    // Default fallback for any unmapped textbooks
+    'ML': [
+      "What is machine learning?",
+      "Define neural networks",
+      "Explain supervised learning",
+      "What are algorithms?",
+      "Introduction to data science",
+      "How does classification work?",
+      "What is regression?",
+      "Explain feature selection"
+    ]
+  };
 
   // Theme management
   useEffect(() => {
@@ -39,19 +65,34 @@ const SearchComponent = () => {
     setIsDark(newTheme);
     localStorage.setItem('theme', newTheme ? 'dark' : 'light');
   };
+  const [selectedTextbook, setSelectedTextbook] = useState('intro_ml'); // Default textbook
+  const [availableTextbooks] = useState([
+    { id: 'intro_ml', name: 'Introduction to Machine Learning', description: 'ML algorithms and concepts' },
+    { id: 'computer_networks', name: 'Computer Networks', description: 'Network protocols and systems' },
+    { id: 'economics', name: 'Economics', description: 'Economic principles and theories' }
+  ]);
+const getCurrentSuggestions = () => {
+  return searchSuggestionsByTextbook[selectedTextbook] || searchSuggestionsByTextbook['ML'];
+};
 
   // Extract query from URL and auto-search on component mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const queryParam = urlParams.get('q');
-    
+    const textbookParam = urlParams.get('textbook');
+
+    if (textbookParam && availableTextbooks.find(t => t.id === textbookParam)) {
+      setSelectedTextbook(textbookParam);
+    }
+
     if (queryParam) {
       setQuery(queryParam);
-      performSearch(queryParam);
+      // Wait for textbook to be set before searching
+      setTimeout(() => performSearch(queryParam, textbookParam || selectedTextbook), 100);
     }
   }, []);
 
-  const performSearch = async (searchQuery) => {
+  const performSearch = async (searchQuery, textbook = selectedTextbook) => {
     if (!searchQuery || !searchQuery.trim()) return;
 
     setLoading(true);
@@ -65,11 +106,14 @@ const SearchComponent = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          query: searchQuery.trim(), 
-          top_k: 5 
+        body: JSON.stringify({
+          query: searchQuery.trim(),
+          top_k: 5,
+          textbook: textbook  // Add textbook parameter
         }),
       });
+
+
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -77,7 +121,7 @@ const SearchComponent = () => {
       }
 
       const data = await response.json();
-      
+
       // Handle the new JSON format
       if (data && data.results && Array.isArray(data.results)) {
         setResults(data.results);
@@ -98,27 +142,27 @@ const SearchComponent = () => {
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
-    await performSearch(query);
-    
-    // Update URL with query parameter
+    await performSearch(query, selectedTextbook);
+
+    // Update URL with query and textbook parameters
     if (query.trim()) {
-      const newUrl = `/search?q=${encodeURIComponent(query.trim())}`;
+      const newUrl = `/search?textbook=${selectedTextbook}&q=${encodeURIComponent(query.trim())}`;
       window.history.pushState({}, '', newUrl);
     }
   };
 
   const handleSuggestionClick = (suggestion) => {
     setQuery(suggestion);
-    performSearch(suggestion);
-    
+    performSearch(suggestion, selectedTextbook);
+
     // Update URL
-    const newUrl = `/search?q=${encodeURIComponent(suggestion)}`;
+    const newUrl = `/search?textbook=${selectedTextbook}&q=${encodeURIComponent(suggestion)}`;
     window.history.pushState({}, '', newUrl);
   };
 
   const handleGetLLMAnswer = () => {
     if (query.trim()) {
-      router.push(`/search/answer?q=${encodeURIComponent(query.trim())}`);
+      router.push(`/search/answer?textbook=${selectedTextbook}&q=${encodeURIComponent(query.trim())}`);
     }
   };
 
@@ -157,11 +201,26 @@ const SearchComponent = () => {
               <div>
                 <h1 className={`text-2xl font-bold ${themeClasses.text}`}>Textbook Search</h1>
                 <p className={`text-sm ${themeClasses.textMuted}`}>AI-powered semantic search</p>
+
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`text-xs ${themeClasses.textMuted}`}>Textbook:</span>
+                <select
+                  value={selectedTextbook}
+                  onChange={(e) => setSelectedTextbook(e.target.value)}
+                  className={`text-xs px-2 py-1 rounded border ${themeClasses.input} ${themeClasses.textSecondary}`}
+                >
+                  {availableTextbooks.map((textbook) => (
+                    <option key={textbook.id} value={textbook.id}>
+                      {textbook.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <Link 
-                href="/search/answer" 
+              <Link
+                href="/search/answer"
                 className={`px-4 py-2 text-sm rounded-lg ${themeClasses.cardBg} ${themeClasses.border} border hover:opacity-80 transition-opacity ${themeClasses.textSecondary} flex items-center gap-2`}
               >
                 <Bot size={16} />
@@ -190,11 +249,11 @@ const SearchComponent = () => {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid lg:grid-cols-12 gap-8">
-          
+
           {/* Left Sidebar - Search Form & Suggestions */}
           <div className="lg:col-span-4 xl:col-span-3">
             <div className="sticky top-8 space-y-6">
-              
+
               {/* Search Form */}
               <div className={`${themeClasses.cardBg} rounded-xl shadow-sm border ${themeClasses.border} p-6`}>
                 <div className="space-y-4">
@@ -265,7 +324,7 @@ const SearchComponent = () => {
                     <h3 className={`font-semibold ${themeClasses.text}`}>Example Queries</h3>
                   </div>
                   <div className="space-y-2">
-                    {searchSuggestions.map((suggestion, index) => (
+                    {getCurrentSuggestions().map((suggestion, index) => (
                       <button
                         key={index}
                         onClick={() => handleSuggestionClick(suggestion)}
@@ -282,20 +341,18 @@ const SearchComponent = () => {
 
           {/* Main Results Area */}
           <div className="lg:col-span-8 xl:col-span-9">
-            
+
             {/* Search Status */}
             {searchAttempted && !loading && !error && (
-              <div className={`mb-6 p-4 ${themeClasses.statusBg} rounded-lg border shadow-sm`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Search className="text-blue-500" size={16} />
-                    <span className={`text-sm ${themeClasses.textSecondary}`}>
-                      Search for: <span className={`font-medium ${themeClasses.text}`}>"{query}"</span>
-                    </span>
-                  </div>
-                  <div className={`text-sm ${themeClasses.textMuted}`}>
-                    {results.length} results found
-                  </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Search className="text-blue-500" size={16} />
+                  <span className={`text-sm ${themeClasses.textSecondary}`}>
+                    Search in <span className="font-medium text-blue-600">{availableTextbooks.find(t => t.id === selectedTextbook)?.name}</span> for: <span className={`font-medium ${themeClasses.text}`}>"{query}"</span>
+                  </span>
+                </div>
+                <div className={`text-sm ${themeClasses.textMuted}`}>
+                  {results.length} results found
                 </div>
               </div>
             )}
@@ -346,7 +403,7 @@ const SearchComponent = () => {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className={`p-6 ${themeClasses.cardBg} space-y-4`}>
                   <div>
                     <h4 className={`font-medium ${themeClasses.text} mb-2`}>Try these suggestions:</h4>
@@ -365,7 +422,7 @@ const SearchComponent = () => {
                       </li>
                     </ul>
                   </div>
-                  
+
                   <div>
                     <h4 className={`font-medium ${themeClasses.text} mb-3`}>Quick suggestions:</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -389,7 +446,7 @@ const SearchComponent = () => {
               <div className="space-y-4">
                 {results.map((result, index) => (
                   <div key={result.chunk_id || index} className={`${themeClasses.cardBg} rounded-xl shadow-sm border ${themeClasses.border} overflow-hidden hover:shadow-md transition-shadow`}>
-                    
+
                     {/* Result Header */}
                     <div className={`p-4 ${themeClasses.resultHeader} border-b`}>
                       <div className="flex items-center justify-between">
@@ -401,7 +458,7 @@ const SearchComponent = () => {
                             Search Result
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center gap-2">
                           {result.score && (
                             <div className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full">
@@ -426,7 +483,7 @@ const SearchComponent = () => {
                           {truncateText(result.content, 800)}
                         </p>
                       </div>
-                      
+
                       {result.chunk_id && result.chunk_id !== 'Unknown' && (
                         <div className={`mt-4 pt-4 border-t ${isDark ? 'border-gray-600' : 'border-gray-100'}`}>
                           <div className={`flex items-center gap-1 text-xs ${themeClasses.textMuted}`}>

@@ -6,6 +6,28 @@ const fs = require('fs');
 
 const app = express();
 
+// Textbook configuration
+const TEXTBOOK_CONFIG = {
+  'intro_ml': {
+    name: 'Introduction to Machine Learning',
+    faiss_files: ['intro_ml_index.faiss', 'intro_ml_metadata.pkl'],
+    description: 'ML algorithms and concepts'
+  },
+  'computer_networks': {
+    name: 'Computer Networks', 
+    faiss_files: ['computer_networks_index.faiss', 'computer_networks_metadata.pkl'],
+    description: 'Computer Network'
+  },
+  'economics': {
+    name: 'Economics',
+    faiss_files: ['economics_index.faiss', 'economics_metadata.pkl'], 
+    description: 'Economics'
+  }
+};
+
+const DEFAULT_TEXTBOOK = 'intro_ml';;
+
+
 // CORS configuration
 app.use(cors({
     origin: [
@@ -53,12 +75,14 @@ function findScriptPath() {
 /**
  * Validate FAISS files exist
  */
-function validateFaissFiles(scriptDir) {
-    const requiredFiles = [
-        'intro_ml_index.faiss',
-        'intro_ml_metadata.pkl'
-    ];
+function validateFaissFiles(scriptDir, textbook = DEFAULT_TEXTBOOK) {
+    const textbookConfig = TEXTBOOK_CONFIG[textbook];
+    if (!textbookConfig) {
+        console.error(`[ERROR] Unknown textbook: ${textbook}`);
+        return { valid: false, missingFiles: [`Unknown textbook: ${textbook}`] };
+    }
 
+    const requiredFiles = textbookConfig.faiss_files;
     const missingFiles = [];
     
     for (const file of requiredFiles) {
@@ -69,11 +93,11 @@ function validateFaissFiles(scriptDir) {
     }
 
     if (missingFiles.length > 0) {
-        console.error(`[ERROR] Missing FAISS files:`, missingFiles);
+        console.error(`[ERROR] Missing FAISS files for ${textbook}:`, missingFiles);
         return { valid: false, missingFiles };
     }
 
-    console.log(`[INFO] All FAISS files found in: ${scriptDir}`);
+    console.log(`[INFO] All FAISS files found for ${textbook} in: ${scriptDir}`);
     return { valid: true, missingFiles: [] };
 }
 
@@ -173,115 +197,103 @@ function extractJsonFromOutput(output) {
 app.post('/search', async (req, res) => {
     const startTime = Date.now();
     
+    // Helper function to get display names
+    const getDisplayName = (textbookId) => {
+        const displayNames = {
+            'computer_networks': 'Computer Networks',
+            'intro_ml': 'Introduction to Machine Learning',
+            'economics': 'Economics'
+        };
+        return displayNames[textbookId] || textbookId;
+    };
+    
     try {
-        const { query, top_k } = req.body;
-
+        const { query, top_k, textbook } = req.body; // Extract textbook from request body
+        
         // Input validation
         if (!query || typeof query !== 'string' || query.trim().length === 0) {
             return res.status(400).json({
                 error: 'Bad Request',
                 message: 'Query is required and must be a non-empty string',
-                example: { query: "What is machine learning?" }
+                example: { query: "What is machine learning?", textbook: "ML" }
             });
         }
 
+        // Map frontend textbook values to what the Python script expects
+        const textbookMapping = {
+            'computer_networks': 'computer_networks',
+            'ml': 'intro_ml',
+            'machine_learning': 'intro_ml',
+            'economics': 'economics',
+            'operating_systems': 'economics'
+        };
+
+        // Use the mapped textbook value, fallback to textbook from request, then to default
+        const selectedTextbook = textbookMapping[textbook?.toLowerCase()] || 
+                                textbook || 
+                                'intro_ml'; // Use the Python script's default
+        
         const topK = top_k && Number.isInteger(top_k) && top_k > 0 ? top_k : 5;
-        console.log(`[${new Date().toISOString()}] Search: "${query.substring(0, 50)}..." (top_k: ${topK})`);
+        
+        // Log the actual values being used
+        console.log(`[${new Date().toISOString()}] Search in ${selectedTextbook}: "${query.substring(0, 50)}..." (top_k: ${topK})`);
+        console.log(`[DEBUG] Textbook received: "${textbook}" -> Mapped to: "${selectedTextbook}"`);
 
-        // Find script path
-        const scriptPath = findScriptPath();
-        if (!scriptPath) {
-            return res.status(500).json({
-                error: 'Configuration Error',
-                message: 'Search script not found. Please ensure search_faiss.py exists.',
-                suggestions: [
-                    'Check if search_faiss.py exists in the project root or embeddings/ folder',
-                    'Verify the file has proper permissions'
-                ]
+        // Validate that the selected textbook is one of the expected values
+        const validTextbooks = ['computer_networks', 'intro_ml', 'economics'];
+        if (!validTextbooks.includes(selectedTextbook)) {
+            return res.status(400).json({
+                error: 'Invalid Textbook',
+                message: `Textbook "${selectedTextbook}" is not supported`,
+                available_textbooks: validTextbooks,
+                received_value: textbook
             });
         }
 
-        // Validate FAISS files
-        const scriptDir = path.dirname(scriptPath);
-        const faissValidation = validateFaissFiles(scriptDir);
-        if (!faissValidation.valid) {
-            return res.status(500).json({
-                error: 'Missing Dependencies',
-                message: 'Required FAISS index files not found',
-                missing_files: faissValidation.missingFiles,
-                script_directory: scriptDir,
-                suggestions: [
-                    'Run the embedding generation script first',
-                    'Ensure all FAISS files are in the correct directory'
-                ]
-            });
-        }
-
-        // Find working Python command
-        const pythonCommand = await findWorkingPythonCommand();
-        if (!pythonCommand) {
-            return res.status(500).json({
-                error: 'Python Not Available',
-                message: 'No working Python installation found',
-                tried_commands: ['python', 'python3', 'py'],
-                suggestions: [
-                    'Install Python and ensure it\'s in your PATH',
-                    'Try running "python --version" in terminal'
-                ]
-            });
-        }
-
-        // Prepare command arguments - CRITICAL: Use --json flag
+        const scriptPath = path.join(__dirname, 'embeddings', 'search_faiss.py');
+        
+        // Use the selectedTextbook variable instead of hardcoded value
         const args = [
-            scriptPath,
+            '--textbook', selectedTextbook, // Use the dynamic textbook value
             '--query', query.trim(),
             '--top_k', topK.toString(),
-            '--json'  // This ensures JSON-only output
+            '--json'
         ];
 
-        console.log(`[DEBUG] Executing: ${pythonCommand} ${args.join(' ')}`);
-        console.log(`[DEBUG] Working directory: ${scriptDir}`);
+        console.log(`[DEBUG] Executing: python ${scriptPath} ${args.join(' ')}`);
+        console.log(`[DEBUG] Working directory: ${path.dirname(scriptPath)}`);
 
-        // Execute Python script with enhanced error handling
+        const pythonProcess = spawn('python', [scriptPath, ...args], {
+            cwd: path.dirname(scriptPath),
+            env: {
+                ...process.env,
+                PYTHONUNBUFFERED: '1',
+                PYTHONIOENCODING: 'utf-8'
+            },
+            timeout: 30000
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
         const result = await new Promise((resolve, reject) => {
-            let isResolved = false;
-            
-            const pythonProcess = spawn(pythonCommand, args, {
-                cwd: scriptDir,
-                env: {
-                    ...process.env,
-                    PYTHONUNBUFFERED: '1',
-                    PYTHONIOENCODING: 'utf-8'
-                },
-                timeout: 45000
-            });
-
-            let stdout = '';
-            let stderr = '';
-
-            pythonProcess.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            pythonProcess.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
-
             pythonProcess.on('close', (code) => {
-                if (isResolved) return;
-                isResolved = true;
-
                 const duration = Date.now() - startTime;
-                console.log(`[DEBUG] Process completed in ${duration}ms with code ${code}`);
-                console.log(`[DEBUG] STDOUT length: ${stdout.length} chars`);
-                console.log(`[DEBUG] STDERR length: ${stderr.length} chars`);
-
-                if (stderr.trim()) {
-                    console.log(`[DEBUG] STDERR content: ${stderr.trim()}`);
-                }
-
                 if (code === 0) {
-                    resolve({ success: true, output: stdout, stderr: stderr, duration });
+                    resolve({ 
+                        success: true, 
+                        output: stdout, 
+                        stderr: stderr,
+                        duration 
+                    });
                 } else {
                     reject({ 
                         success: false, 
@@ -294,96 +306,54 @@ app.post('/search', async (req, res) => {
             });
 
             pythonProcess.on('error', (error) => {
-                if (isResolved) return;
-                isResolved = true;
-                reject({ success: false, error: error.message, duration: Date.now() - startTime });
+                reject({ 
+                    success: false, 
+                    error: error.message,
+                    duration: Date.now() - startTime 
+                });
             });
-
-            // Timeout handler
-            setTimeout(() => {
-                if (!isResolved) {
-                    isResolved = true;
-                    pythonProcess.kill('SIGTERM');
-                    reject({ 
-                        success: false, 
-                        error: 'timeout', 
-                        duration: Date.now() - startTime,
-                        message: 'Search operation timed out after 45 seconds'
-                    });
-                }
-            }, 45000);
         });
 
-        // Success response - Enhanced JSON parsing
         console.log(`[${new Date().toISOString()}] Search completed successfully in ${result.duration}ms`);
         
-        // Extract and parse JSON from the output
         const jsonResult = extractJsonFromOutput(result.output);
         
         if (jsonResult) {
-            console.log(`[DEBUG] Successfully parsed JSON with ${jsonResult.total_results || 0} results`);
+            // Add textbook metadata to response
+            jsonResult.textbook = selectedTextbook;
+            jsonResult.textbook_display_name = getDisplayName(selectedTextbook);
+            jsonResult.query = query.trim();
+            
+            console.log(`[DEBUG] Successfully parsed JSON with ${jsonResult.total_results || jsonResult.results?.length || 0} results from ${selectedTextbook}`);
             res.status(200).json(jsonResult);
         } else {
             console.log(`[WARNING] Could not parse JSON from output. Raw output:`, result.output.substring(0, 200));
             
-            // Fallback: create a properly formatted response
-            const fallbackResponse = {
+            res.status(500).json({
                 error: "JSON Parse Error",
                 message: "The search script did not return valid JSON",
                 raw_output: result.output.substring(0, 500),
+                textbook: selectedTextbook,
                 suggestions: [
                     "The Python script may not be using the updated version with proper JSON mode",
                     "Check if the --json flag is being handled correctly in the Python script"
                 ]
-            };
-            
-            res.status(500).json(fallbackResponse);
+            });
         }
 
     } catch (error) {
         const duration = Date.now() - startTime;
         console.error(`[${new Date().toISOString()}] Search failed after ${duration}ms:`, error);
 
-        // Handle different types of errors
-        if (error.error === 'timeout') {
-            return res.status(504).json({
-                error: 'Request Timeout',
-                message: error.message || 'Search operation timed out',
-                duration: `${duration}ms`,
-                suggestions: [
-                    'The model might be loading for the first time (this can take several minutes)',
-                    'Try a simpler query',
-                    'Check if the FAISS index is corrupted and needs regeneration'
-                ]
-            });
-        }
-
-        if (error.stderr) {
-            // Try to parse stderr as JSON first
-            const stderrJson = extractJsonFromOutput(error.stderr);
-            if (stderrJson && stderrJson.error) {
-                return res.status(500).json(stderrJson);
-            }
-
-            return res.status(500).json({
-                error: 'Python Script Error',
-                message: 'The search script encountered an error',
-                details: error.stderr,
-                stdout: error.stdout ? error.stdout.substring(0, 200) : null,
-                duration: `${duration}ms`,
-                suggestions: [
-                    'Check if all required Python packages are installed',
-                    'Verify the FAISS index files are not corrupted',
-                    'Run: pip install faiss-cpu sentence-transformers'
-                ]
-            });
-        }
-
-        // Generic error response
         res.status(500).json({
-            error: 'Internal Server Error',
+            error: 'Search Failed',
             message: error.message || 'An unexpected error occurred during search',
-            duration: `${duration}ms`
+            textbook: req.body.textbook,
+            duration: `${duration}ms`,
+            details: process.env.NODE_ENV === 'development' ? {
+                stderr: error.stderr,
+                stdout: error.stdout
+            } : undefined
         });
     }
 });
@@ -549,7 +519,7 @@ app.get('/search/debug', async (req, res) => {
 
         // Check FAISS files
         const faissFiles = ['intro_ml_index.faiss', 'intro_ml_metadata.pkl', 'intro_ml_metadata.json'];
-        [__dirname, path.join(__dirname, 'embeddings')].forEach(dir => {
+        [__dirname, path.join(__dirname, 'embeddings','indices')].forEach(dir => {
             faissFiles.forEach(file => {
                 const filePath = path.join(dir, file);
                 const key = `${dir}/${file}`;
@@ -633,26 +603,37 @@ app.use((err, req, res, next) => {
 /**
  * POST /search/answer - Generate LLM answer from search results
  */
+/**
+ * POST /search/answer - Generate LLM answer from search results
+ */
 app.post('/search/answer', async (req, res) => {
     const startTime = Date.now();
-    
+
     try {
-        const { query } = req.body;
+        const { query, textbook, top_k } = req.body; // Extract top_k from request body
 
         // Input validation
         if (!query || typeof query !== 'string' || query.trim().length === 0) {
             return res.status(400).json({
                 error: 'Bad Request',
                 message: 'Query is required and must be a non-empty string',
-                example: { query: "What is machine learning?" }
+                example: { query: "What is machine learning?", textbook: "computer_networks" }
             });
         }
 
-        console.log(`[${new Date().toISOString()}] LLM Answer request: "${query.substring(0, 50)}..."`);
+        // Map textbook values to what the Python script expects
+        const textbookMapping = {
+            'computer_networks': 'computer_networks',
+            'ml': 'intro_ml',
+            'machine_learning': 'intro_ml',
+            'economics': 'economics'
+        };
 
-        // First, get search results using existing search logic
-        const searchStartTime = Date.now();
-        
+        const selectedTextbook = textbookMapping[textbook?.toLowerCase()] || textbook || 'intro_ml';
+        const topK = top_k && Number.isInteger(top_k) && top_k > 0 ? top_k : 3;
+
+        console.log(`[${new Date().toISOString()}] LLM Answer request for ${selectedTextbook}: "${query.substring(0, 50)}..."`);
+
         // Find script path and validate
         const scriptPath = findScriptPath();
         if (!scriptPath) {
@@ -670,17 +651,21 @@ app.post('/search/answer', async (req, res) => {
             });
         }
 
-        // Execute FAISS search first
+        const searchStartTime = Date.now();
+        
+        // Fix: Use the correctly defined variables
         const searchArgs = [
             scriptPath,
+            '--textbook', selectedTextbook,
             '--query', query.trim(),
-            '--top_k', '5',
+            '--top_k', String(topK),
             '--json'
         ];
 
+        console.log(`[DEBUG] Search args: ${pythonCommand} ${searchArgs.join(' ')}`);
+
         const searchResult = await new Promise((resolve, reject) => {
             let isResolved = false;
-            
             const pythonProcess = spawn(pythonCommand, searchArgs, {
                 cwd: path.dirname(scriptPath),
                 env: {
@@ -688,29 +673,19 @@ app.post('/search/answer', async (req, res) => {
                     PYTHONUNBUFFERED: '1',
                     PYTHONIOENCODING: 'utf-8'
                 },
-                timeout: 30000
+                timeout: 45000
             });
 
             let stdout = '';
             let stderr = '';
 
-            pythonProcess.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            pythonProcess.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
+            pythonProcess.stdout.on('data', (data) => { stdout += data.toString(); });
+            pythonProcess.stderr.on('data', (data) => { stderr += data.toString(); });
 
             pythonProcess.on('close', (code) => {
                 if (isResolved) return;
                 isResolved = true;
-
-                if (code === 0) {
-                    resolve({ success: true, output: stdout, stderr });
-                } else {
-                    reject({ success: false, code, stderr: stderr.trim(), stdout: stdout.trim() });
-                }
+                code === 0 ? resolve({ success: true, output: stdout, stderr }) : reject({ success: false, code, stderr: stderr.trim(), stdout: stdout.trim() });
             });
 
             pythonProcess.on('error', (error) => {
@@ -728,9 +703,8 @@ app.post('/search/answer', async (req, res) => {
             }, 30000);
         });
 
-        // Parse search results
         const searchJsonResult = extractJsonFromOutput(searchResult.output);
-        
+
         if (!searchJsonResult || !searchJsonResult.results || searchJsonResult.results.length === 0) {
             return res.status(404).json({
                 error: 'No Results Found',
@@ -741,14 +715,12 @@ app.post('/search/answer', async (req, res) => {
 
         const searchResults = searchJsonResult.results;
         const searchDuration = Date.now() - searchStartTime;
-        
+
         console.log(`[DEBUG] Found ${searchResults.length} chunks for LLM processing`);
 
-        // Now call the LLM script with the chunks
         const llmStartTime = Date.now();
-        const llmScriptPath = path.join(__dirname,'embeddings', 'llm_answer.py');
-        
-        // Check if LLM script exists
+        const llmScriptPath = path.join(__dirname, 'embeddings', 'llm_answer.py');
+
         if (!fs.existsSync(llmScriptPath)) {
             return res.status(500).json({
                 error: 'LLM Script Not Found',
@@ -757,10 +729,7 @@ app.post('/search/answer', async (req, res) => {
             });
         }
 
-        // Prepare arguments for LLM script: query + all chunk contents
         const llmArgs = [llmScriptPath, query.trim()];
-        
-        // Add each chunk content as a separate argument
         searchResults.forEach(chunk => {
             llmArgs.push(chunk.content || '');
         });
@@ -769,7 +738,6 @@ app.post('/search/answer', async (req, res) => {
 
         const llmResult = await new Promise((resolve, reject) => {
             let isResolved = false;
-            
             const llmProcess = spawn(pythonCommand, llmArgs, {
                 cwd: __dirname,
                 env: {
@@ -777,24 +745,18 @@ app.post('/search/answer', async (req, res) => {
                     PYTHONUNBUFFERED: '1',
                     PYTHONIOENCODING: 'utf-8'
                 },
-                timeout: 120000 // 2 minutes for LLM processing
+                timeout: 120000
             });
 
             let stdout = '';
             let stderr = '';
 
-            llmProcess.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            llmProcess.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
+            llmProcess.stdout.on('data', (data) => { stdout += data.toString(); });
+            llmProcess.stderr.on('data', (data) => { stderr += data.toString(); });
 
             llmProcess.on('close', (code) => {
                 if (isResolved) return;
                 isResolved = true;
-
                 if (code === 0) {
                     try {
                         const result = JSON.parse(stdout.trim());
@@ -842,11 +804,10 @@ app.post('/search/answer', async (req, res) => {
         const llmDuration = Date.now() - llmStartTime;
         const totalDuration = Date.now() - startTime;
 
-        console.log(`[DEBUG] LLM processing completed in ${llmDuration}ms`);
-
-        // Build response
         const response = {
             query: query.trim(),
+            textbook: selectedTextbook,
+            textbook_name: getTextbookDisplayName(selectedTextbook),
             answer: llmResult.answer || llmResult.response || 'No answer generated',
             api_used: llmResult.api_used || 'Unknown',
             model_used: llmResult.model_used || null,
@@ -880,7 +841,6 @@ app.post('/search/answer', async (req, res) => {
         let statusCode = 500;
         let errorMessage = 'Failed to generate LLM answer';
 
-        // Handle specific error types
         if (error.error === 'Search timeout' || error.message?.includes('timeout')) {
             statusCode = 408;
             errorMessage = 'Request timed out. The search or LLM processing took too long.';
@@ -911,6 +871,17 @@ app.post('/search/answer', async (req, res) => {
         });
     }
 });
+
+// Helper function for textbook display names
+function getTextbookDisplayName(textbookId) {
+    const displayNames = {
+        'computer_networks': 'Computer Networks',
+        'intro_ml': 'Introduction to Machine Learning',
+        'economics': 'Economics'
+    };
+    return displayNames[textbookId] || textbookId;
+}
+
 
 
 

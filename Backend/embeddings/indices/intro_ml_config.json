@@ -1,0 +1,7 @@
+{
+  "textbook_name": "Introduction to Machine Learning",
+  "description": "Covers fundamentals of machine learning including supervised and unsupervised learning techniques.",
+  "total_chunks": 110,
+  "created_at": "2025-07-27",
+  "model_name": "all-MiniLM-L6-v2"
+}

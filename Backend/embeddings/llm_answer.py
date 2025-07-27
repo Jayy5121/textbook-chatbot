@@ -64,14 +64,25 @@ def call_openrouter(chunks: List[str], user_query: str) -> str:
     try:
         excerpts = '\n\n'.join([f"{i+1}. \"{chunk}\"" for i, chunk in enumerate(chunks)])
 
-        prompt = f"""Based ONLY on the following textbook excerpts, answer the user's question in a clear, comprehensive way. Provide detailed explanations and examples when relevant. Do not add any external information.
+        prompt = f"""You are an expert tutor helping students understand concepts directly from their textbooks.
+
+Instructions: Based only on the following textbook excerpts, answer the user's question in a clear, structured, and detailed manner.
+
+Do not use any external knowledge or assumptions.
+
+Ensure the explanation is accurate and easy to understand for a college student.
+
+Use examples, analogies, or subheadings where appropriate to improve clarity.
+
+If the answer is not present in the excerpts, respond with: “The provided excerpts do not contain enough information to answer this question.”
 
 Textbook Excerpts:
 {excerpts}
 
-Question: {user_query}
+User Question:
+{user_query}
 
-Please provide a thorough answer based solely on the information provided above."""
+Answer:"""
 
         headers = {
             'Authorization': f'Bearer {OPENROUTER_API_KEY}',

@@ -15,16 +15,50 @@ const LLMAnswerPage = () => {
   const [showSources, setShowSources] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const answerSuggestions = [
-    "What is machine learning and how does it work?",
-    "Explain the difference between supervised and unsupervised learning",
-    "How do neural networks process information?",
-    "What are the main types of machine learning algorithms?",
-    "Explain the concept of overfitting in machine learning",
-    "What is feature engineering and why is it important?",
-    "How does gradient descent optimization work?",
-    "What are the applications of deep learning?"
-  ];
+  const [selectedTextbook, setSelectedTextbook] = useState('intro_ml');// Default textbook
+  const [availableTextbooks] = useState([
+    { id: 'intro_ml', name: 'Introduction to Machine Learning', description: 'ML algorithms and concepts' },
+    { id: 'computer_networks', name: 'Computer Networks', description: 'Network protocols and systems' },
+    { id: 'economics', name: 'Economics', description: 'Economic principles and theories' }
+  ]);
+
+  const answerSuggestionsByTextbook = {
+    'computer_networks': [
+      "What is a computer network and how does it work?",
+      "Explain the OSI model and its seven layers in detail",
+      "How does IP addressing work and what are the different types?",
+      "What is packet switching and how does it differ from circuit switching?",
+      "Explain the TCP/IP protocol suite and its importance",
+      "How does DNS work and what is its role in networking?",
+      "What are network protocols and why are they essential?",
+      "Compare different network topologies and their advantages"
+    ],
+    'economics': [
+      "What is demand and how does it affect market prices?",
+      "Explain the law of supply and demand with real-world examples",
+      "What is GDP and how is it calculated and interpreted?",
+      "Define inflation and explain its causes and effects on the economy",
+      "What are market structures and how do they influence competition?",
+      "What is opportunity cost and how does it guide economic decisions?",
+      "Explain economic equilibrium and how markets reach balance",
+      "What is monetary policy and how do central banks use it?"
+    ],
+
+    // Default fallback for any unmapped textbooks
+    'ML': [
+      "What is machine learning and how does it work?",
+      "Explain the difference between supervised and unsupervised learning",
+      "How do neural networks process information?",
+      "What are the main types of machine learning algorithms?",
+      "Explain the concept of overfitting in machine learning",
+      "What is feature engineering and why is it important?",
+      "How does gradient descent optimization work?",
+      "What are the applications of deep learning?"
+    ]
+  };
+const getCurrentAnswerSuggestions = () => {
+  return answerSuggestionsByTextbook[selectedTextbook] || answerSuggestionsByTextbook['ML'];
+};
 
   // Theme management
   useEffect(() => {
@@ -46,14 +80,20 @@ const LLMAnswerPage = () => {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const queryParam = urlParams.get('q');
-    
+    const textbookParam = urlParams.get('textbook');
+
+    if (textbookParam && availableTextbooks.find(t => t.id === textbookParam)) {
+      setSelectedTextbook(textbookParam);
+    }
+
     if (queryParam) {
       setQuery(queryParam);
-      performSearch(queryParam);
+      // Wait for textbook to be set before searching
+      setTimeout(() => performSearch(queryParam, textbookParam || selectedTextbook), 100);
     }
   }, []);
 
-  const performSearch = async (searchQuery) => {
+  const performSearch = async (searchQuery, textbook = selectedTextbook) => {
     if (!searchQuery || !searchQuery.trim()) return;
 
     setLoading(true);
@@ -67,10 +107,13 @@ const LLMAnswerPage = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          query: searchQuery.trim()
+        body: JSON.stringify({
+          query: searchQuery.trim(),
+          textbook: textbook  // Add textbook parameter
         }),
       });
+
+      // ... rest of the function remains the same
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -90,21 +133,21 @@ const LLMAnswerPage = () => {
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
-    await performSearch(query);
-    
-    // Update URL with query parameter
+    await performSearch(query, selectedTextbook);
+
+    // Update URL with query and textbook parameters
     if (query.trim()) {
-      const newUrl = `/search/answer?q=${encodeURIComponent(query.trim())}`;
+      const newUrl = `/search/answer?textbook=${selectedTextbook}&q=${encodeURIComponent(query.trim())}`;
       window.history.pushState({}, '', newUrl);
     }
   };
 
   const handleSuggestionClick = (suggestion) => {
     setQuery(suggestion);
-    performSearch(suggestion);
-    
+    performSearch(suggestion, selectedTextbook);
+
     // Update URL
-    const newUrl = `/search/answer?q=${encodeURIComponent(suggestion)}`;
+    const newUrl = `/search/answer?textbook=${selectedTextbook}&q=${encodeURIComponent(suggestion)}`;
     window.history.pushState({}, '', newUrl);
   };
 
@@ -150,8 +193,8 @@ const LLMAnswerPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <Link 
-                href="/search" 
+              <Link
+                href="/search"
                 className={`p-2 rounded-lg ${themeClasses.cardBg} ${themeClasses.border} border hover:opacity-80 transition-opacity`}
               >
                 <ArrowLeft className={themeClasses.textMuted} size={20} />
@@ -163,10 +206,24 @@ const LLMAnswerPage = () => {
                 <h1 className={`text-2xl font-bold ${themeClasses.text}`}>AI Answer</h1>
                 <p className={`text-sm ${themeClasses.textMuted}`}>Comprehensive AI-generated answers</p>
               </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`text-xs ${themeClasses.textMuted}`}>Textbook:</span>
+                <select
+                  value={selectedTextbook}
+                  onChange={(e) => setSelectedTextbook(e.target.value)}
+                  className={`text-xs px-2 py-1 rounded border ${themeClasses.input} ${themeClasses.textSecondary}`}
+                >
+                  {availableTextbooks.map((textbook) => (
+                    <option key={textbook.id} value={textbook.id}>
+                      {textbook.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="flex items-center gap-4">
-              <Link 
-                href="/search" 
+              <Link
+                href={`/search?textbook=${selectedTextbook}`}
                 className={`px-4 py-2 text-sm rounded-lg ${themeClasses.cardBg} ${themeClasses.border} border hover:opacity-80 transition-opacity ${themeClasses.textSecondary} flex items-center gap-2`}
               >
                 <Search size={16} />
@@ -191,11 +248,11 @@ const LLMAnswerPage = () => {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid lg:grid-cols-12 gap-8">
-          
+
           {/* Left Sidebar - Search Form & Suggestions */}
           <div className="lg:col-span-4 xl:col-span-3">
             <div className="sticky top-8 space-y-6">
-              
+
               {/* Search Form */}
               <div className={`${themeClasses.cardBg} rounded-xl shadow-sm border ${themeClasses.border} p-6`}>
                 <div className="space-y-4">
@@ -241,7 +298,7 @@ const LLMAnswerPage = () => {
                     </h3>
                   </div>
                   <div className="space-y-2">
-                    {answerSuggestions.map((suggestion, index) => (
+                    {getCurrentAnswerSuggestions().map((suggestion, index) => (
                       <button
                         key={index}
                         onClick={() => handleSuggestionClick(suggestion)}
@@ -259,30 +316,28 @@ const LLMAnswerPage = () => {
 
           {/* Main Answer Area */}
           <div className="lg:col-span-8 xl:col-span-9">
-            
+
             {/* Search Status */}
             {searchAttempted && !loading && !error && answer && (
-              <div className={`mb-6 p-4 ${themeClasses.statusBg} rounded-lg border shadow-sm`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="text-purple-500" size={16} />
-                    <span className={`text-sm ${themeClasses.textSecondary}`}>
-                      AI Answer for: <span className={`font-medium ${themeClasses.text}`}>"{query}"</span>
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs">
-                    {answer.timing && (
-                      <div className={`${themeClasses.textMuted} flex items-center gap-1`}>
-                        <Clock size={12} />
-                        <span>{formatDuration(answer.timing.total_duration)}</span>
-                      </div>
-                    )}
-                    {answer.api_used && (
-                      <div className={`px-2 py-1 rounded-full text-xs ${isDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
-                        {answer.api_used}
-                      </div>
-                    )}
-                  </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot className="text-purple-500" size={16} />
+                  <span className={`text-sm ${themeClasses.textSecondary}`}>
+                    AI Answer from <span className="font-medium text-purple-600">{availableTextbooks.find(t => t.id === selectedTextbook)?.name}</span> for: <span className={`font-medium ${themeClasses.text}`}>"{query}"</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-xs">
+                  {answer.timing && (
+                    <div className={`${themeClasses.textMuted} flex items-center gap-1`}>
+                      <Clock size={12} />
+                      <span>{formatDuration(answer.timing.total_duration)}</span>
+                    </div>
+                  )}
+                  {answer.api_used && (
+                    <div className={`px-2 py-1 rounded-full text-xs ${isDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
+                      {answer.api_used}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -383,7 +438,7 @@ const LLMAnswerPage = () => {
                   </div>
                   {showSources ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                 </button>
-                
+
                 {showSources && (
                   <div className={`border-t ${themeClasses.border} p-4 space-y-3`}>
                     {answer.search_results.map((chunk, index) => (
@@ -437,8 +492,8 @@ const LLMAnswerPage = () => {
                     </p>
                     <div className="flex justify-center space-x-1">
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                   </div>
                 </div>

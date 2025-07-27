@@ -1,0 +1,7 @@
+{
+  "textbook_name": "Computer Networks",
+  "description": "Computer Networking concepts, protocols, and architectures.",
+  "total_chunks": 123,
+  "created_at": "2025-07-27",
+  "model_name": "all-MiniLM-L6-v2"
+}
