@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ['nodejs', 'python311', 'pipenv']
+
+[phases.build]
+cmds = ['pip install -r requirements.txt']
+
+[phases.start]
+cmd = 'node server.js'
